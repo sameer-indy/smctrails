@@ -21,30 +21,66 @@
         <link rel="stylesheet" href="https://unpkg.com/@raruto/leaflet-elevation/dist/leaflet-elevation.css" />
         
         <style>
-        html, body {
-            width: 100%;
-            height: 100%;
-            padding: 0;
-            margin: 0;
-        }
-        #container {
-            display: flex;
-            flex-direction: column;
-            width: 100%;
-            height: 100%;
-        }        
-        #map {
-            width: 100%;
-            flex: 1;
-        }
-        #elevation-div {
-            width: 100%;
-            height: 25%;
-            font: 12px/1.5 "Helvetica Neue", Arial, Helvetica, sans-serif;
-            background: white;
-            border-top: 1px solid #ccc;
-        }
-        </style>
+html, body {
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    margin: 0;
+}
+#container {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+}
+#map {
+    width: 100%;
+    flex: 1;
+}
+
+/* Loading and error messages for elevation control */
+.elevation-loading {
+    text-align: center;
+    padding: 20px;
+    color: #666;
+}
+
+.elevation-error {
+    text-align: center;
+    padding: 20px;
+    color: #d32f2f;
+    background-color: #ffebee;
+    border-radius: 4px;
+}
+
+/* Style for detached elevation control box (bottom-left by default) */
+.leaflet-control-elevation.lime-theme.detached {
+    width: 400px;
+    height: 180px;
+    background-color: #d4edda; /* light lime green */
+    border: 2px solid #28a745; /* dark lime green */
+    border-radius: 6px;
+    box-shadow: 0 2px 10px rgba(40, 167, 69, 0.4);
+    color: #155724; /* dark green text */
+    font-family: "Helvetica Neue", Arial, Helvetica, sans-serif;
+    font-size: 12px;
+    line-height: 1.5;
+    overflow: hidden;
+    position: fixed; /* ensures floating over map */
+    bottom: 10px;    /* position bottom left */
+    left: 10px;
+    z-index: 1000;
+}
+
+/* Styles for loading/error inside detached control */
+.leaflet-control-elevation.lime-theme.detached .elevation-loading,
+.leaflet-control-elevation.lime-theme.detached .elevation-error {
+    padding: 10px;
+    font-weight: bold;
+    color: #155724;
+}
+
+</style>
         
        <!-- D3.js v7 (complete library) -->
        <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
@@ -72,18 +108,8 @@
     <body>
         <div id="container">
             <div id="map"></div>
-            <div id="elevation-div" style="position: relative;">
-                <button id="close-elevation" style="
-                    position: absolute;
-                    top: 5px;
-                    right: 10px;
-                    z-index: 1000;
-                    padding: 4px 8px;
-                    background-color: #fff;
-                    border: 1px solid #ccc;
-                    cursor: pointer;
-                    font-size: 12px;
-                ">✖ Close</button>
+            <div id="elevation-container"></div>
+            <div id="elevation-div" class="lime-theme"></div>
             </div>
         </div>
         
@@ -112,6 +138,139 @@
         <script src="data/BlueMayappleLoop_9.js"></script>
         <script src="data/SquatchHQ_10.js"></script>
         <script>
+
+         
+        // ==========================================
+        // ADD ALL THE NEW ELEVATION CODE RIGHT HERE
+        // ==========================================
+        
+        // Global elevation control variable
+        let currentElevationControl = null;
+        let currentGPXLayer = null;
+        
+        // Function to clear any existing elevation control
+function clearElevationControl() {
+    if (currentElevationControl) {
+        try {
+            currentElevationControl.clear();
+        } catch (e) {}
+        currentElevationControl = null;
+    }
+    if (currentGPXLayer) {
+        map.removeLayer(currentGPXLayer);
+        currentGPXLayer = null;
+    }
+}
+        
+        // Function to load GPX and create elevation chart
+function loadGPXElevation(gpxFilePath) {
+    const container = document.getElementById('elevation-div');
+    clearElevationControl();
+
+    container.style.display = 'block';
+    container.innerHTML = '<div class="elevation-loading">Loading elevation data...</div>';
+
+currentElevationControl = L.control.elevation({
+    detached: false,
+    theme: "lime-theme",
+    summary: "inline",
+    ruler: true,
+    legend: true,
+});
+    //const tempMap = L.map(document.createElement('div'));
+    currentElevationControl.addTo(map);
+
+    console.log("Loading GPX file:", gpxFilePath);
+
+    currentGPXLayer = new L.GPX(gpxFilePath, {
+        async: true,
+        marker_options: { startIconUrl: null, endIconUrl: null, shadowUrl: null }
+    })
+    .on('loaded', function(e) {
+        console.log("GPX loaded successfully");
+        container.innerHTML = '';
+        currentElevationControl.load(e.target._gpx);;
+    })
+    .on('error', function(err) {
+        console.error("Failed to load GPX:", err);
+        container.innerHTML = '<div class="elevation-error">Failed to load elevation data.</div>';
+    });
+
+    map.addLayer(currentGPXLayer);
+}
+
+        
+                // Modified popup function for trails with GPX files
+        function createTrailPopupWithElevation(feature, layer) {
+            // Set up mouse events for highlighting
+            layer.on({
+                mouseout: function(e) {
+                    for (var i in e.target._eventParents) {
+                        if (typeof e.target._eventParents[i].resetStyle === 'function') {
+                            e.target._eventParents[i].resetStyle(e.target);
+                        }
+                    }
+                },
+                mouseover: highlightFeature,
+            });
+
+            // Create popup content with elevation container
+            var popupContent = '<table>' +
+    '<tr>' +
+        '<th scope="row">Name:</th>' +
+        '<td>' + (feature.properties['Name:'] !== null ? autolinker.link(String(feature.properties['Name:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>' +
+    '</tr>' +
+    '<tr>' +
+        '<th scope="row">Terrain:</th>' +
+        '<td>' + (feature.properties['Terrain:'] !== null ? autolinker.link(String(feature.properties['Terrain:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>' +
+    '</tr>' +
+    '<tr>' +
+        '<th scope="row">Description:</th>' +
+        '<td>' + (feature.properties['Description:'] !== null ? autolinker.link(String(feature.properties['Description:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>' +
+    '</tr>' +
+    '<tr>' +
+        '<th scope="row">Elevation Gain:</th>' +
+        '<td>' + (feature.properties['Elevation Gain:'] !== null ? autolinker.link(String(feature.properties['Elevation Gain:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>' +
+    '</tr>' +
+    '<tr>' +
+        '<th scope="row">Length:</th>' +
+        '<td>' + (feature.properties['Length:'] !== null ? autolinker.link(String(feature.properties['Length:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>' +
+    '</tr>' +
+'</table>' +
+'<div id="elevation-container"></div>';
+            var content = removeEmptyRowsFromPopupContent(popupContent, feature);
+            
+            // Handle popup events
+            layer.on('popupopen', function(e) {
+                addClassToPopupIfMedia(content, e.popup);
+                
+                // Load elevation chart if GPX file exists
+                if (feature.properties && feature.properties.gpx_file) {
+                    const gpxFileName = feature.properties.gpx_file;
+                    const gpxFilePath = `gpx_files/${gpxFileName}`;
+                    
+                    // Wait a bit for the popup to render, then load elevation
+                    setTimeout(() => {
+                        const elevationContainer = document.getElementById('elevation-container');
+                        if (elevationContainer) {
+                            loadGPXElevation(gpxFilePath);
+                        }
+                    }, 100);
+                }
+            });
+            
+            // Clear elevation control when popup closes
+            layer.on('popupclose', function(e) {
+                clearElevationControl();
+            });
+            
+            layer.bindPopup(content, { 
+                maxHeight: 600, // Increased to accommodate elevation chart
+                maxWidth: 500
+            });
+        }
+    
+        
         var highlightLayer;
         function highlightFeature(e) {
             highlightLayer = e.target;
@@ -281,6 +440,7 @@
         bounds_group.addLayer(layer_Contours20ftIntervals_1);
         map.addLayer(layer_Contours20ftIntervals_1);
         function pop_FrostyandSquatchyLeftoversLoop_2(feature, layer) {
+                createTrailPopupWithElevation(feature, layer);
             layer.on({
                 mouseout: function(e) {
                     for (var i in e.target._eventParents) {
@@ -291,29 +451,6 @@
                 },
                 mouseover: highlightFeature,
             });
-            var popupContent = '<table>\
-                    <tr>\
-                        <th scope="row">Name:</th>\
-                        <td>' + (feature.properties['Name:'] !== null ? autolinker.link(String(feature.properties['Name:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                    <tr>\
-                        <th scope="row">Description:</th>\
-                        <td>' + (feature.properties['Description:'] !== null ? autolinker.link(String(feature.properties['Description:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                    <tr>\
-                        <th scope="row">Elevation Gain:</th>\
-                        <td>' + (feature.properties['Elevation Gain:'] !== null ? autolinker.link(String(feature.properties['Elevation Gain:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                    <tr>\
-                        <th scope="row">Length:</th>\
-                        <td>' + (feature.properties['Length:'] !== null ? autolinker.link(String(feature.properties['Length:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                </table>';
-            var content = removeEmptyRowsFromPopupContent(popupContent, feature);
-			layer.on('popupopen', function(e) {
-				addClassToPopupIfMedia(content, e.popup);
-			});
-			layer.bindPopup(content, { maxHeight: 400 });
         }
 
         function style_FrostyandSquatchyLeftoversLoop_2_0() {
@@ -344,6 +481,7 @@
         bounds_group.addLayer(layer_FrostyandSquatchyLeftoversLoop_2);
         map.addLayer(layer_FrostyandSquatchyLeftoversLoop_2);
         function pop_BlueLoop_3(feature, layer) {
+                createTrailPopupWithElevation(feature, layer);
             layer.on({
                 mouseout: function(e) {
                     for (var i in e.target._eventParents) {
@@ -354,25 +492,6 @@
                 },
                 mouseover: highlightFeature,
             });
-            var popupContent = '<table>\
-                    <tr>\
-                        <th scope="row">Name:</th>\
-                        <td>' + (feature.properties['Name:'] !== null ? autolinker.link(String(feature.properties['Name:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                    <tr>\
-                        <th scope="row">Elevation Gain:</th>\
-                        <td>' + (feature.properties['Elevation Gain:'] !== null ? autolinker.link(String(feature.properties['Elevation Gain:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                    <tr>\
-                        <th scope="row">Length:</th>\
-                        <td>' + (feature.properties['Length:'] !== null ? autolinker.link(String(feature.properties['Length:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                </table>';
-            var content = removeEmptyRowsFromPopupContent(popupContent, feature);
-			layer.on('popupopen', function(e) {
-				addClassToPopupIfMedia(content, e.popup);
-			});
-			layer.bindPopup(content, { maxHeight: 400 });
         }
 
         function style_BlueLoop_3_0() {
@@ -403,6 +522,7 @@
         bounds_group.addLayer(layer_BlueLoop_3);
         map.addLayer(layer_BlueLoop_3);
         function pop_CheckeredLoop_4(feature, layer) {
+                createTrailPopupWithElevation(feature, layer);
             layer.on({
                 mouseout: function(e) {
                     for (var i in e.target._eventParents) {
@@ -413,25 +533,6 @@
                 },
                 mouseover: highlightFeature,
             });
-            var popupContent = '<table>\
-                    <tr>\
-                        <th scope="row">Name:</th>\
-                        <td>' + (feature.properties['Name:'] !== null ? autolinker.link(String(feature.properties['Name:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                    <tr>\
-                        <th scope="row">Length:</th>\
-                        <td>' + (feature.properties['Length:'] !== null ? autolinker.link(String(feature.properties['Length:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                    <tr>\
-                        <th scope="row">Elevation Gain:</th>\
-                        <td>' + (feature.properties['Elevation Gain:'] !== null ? autolinker.link(String(feature.properties['Elevation Gain:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                </table>';
-            var content = removeEmptyRowsFromPopupContent(popupContent, feature);
-			layer.on('popupopen', function(e) {
-				addClassToPopupIfMedia(content, e.popup);
-			});
-			layer.bindPopup(content, { maxHeight: 400 });
         }
 
         function style_CheckeredLoop_4_0() {
@@ -462,6 +563,7 @@
         bounds_group.addLayer(layer_CheckeredLoop_4);
         map.addLayer(layer_CheckeredLoop_4);
         function pop_YellowBlackLoop_5(feature, layer) {
+                createTrailPopupWithElevation(feature, layer);
             layer.on({
                 mouseout: function(e) {
                     for (var i in e.target._eventParents) {
@@ -472,25 +574,6 @@
                 },
                 mouseover: highlightFeature,
             });
-            var popupContent = '<table>\
-                    <tr>\
-                        <th scope="row">Name:</th>\
-                        <td>' + (feature.properties['Name:'] !== null ? autolinker.link(String(feature.properties['Name:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                    <tr>\
-                        <th scope="row">Elevation Gain:</th>\
-                        <td>' + (feature.properties['Elevation Gain:'] !== null ? autolinker.link(String(feature.properties['Elevation Gain:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                    <tr>\
-                        <th scope="row">Length:</th>\
-                        <td>' + (feature.properties['Length:'] !== null ? autolinker.link(String(feature.properties['Length:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                </table>';
-            var content = removeEmptyRowsFromPopupContent(popupContent, feature);
-			layer.on('popupopen', function(e) {
-				addClassToPopupIfMedia(content, e.popup);
-			});
-			layer.bindPopup(content, { maxHeight: 400 });
         }
 
         function style_YellowBlackLoop_5_0() {
@@ -521,6 +604,7 @@
         bounds_group.addLayer(layer_YellowBlackLoop_5);
         map.addLayer(layer_YellowBlackLoop_5);
         function pop_PinkLoop_6(feature, layer) {
+                createTrailPopupWithElevation(feature, layer);
             layer.on({
                 mouseout: function(e) {
                     for (var i in e.target._eventParents) {
@@ -531,25 +615,6 @@
                 },
                 mouseover: highlightFeature,
             });
-            var popupContent = '<table>\
-                    <tr>\
-                        <th scope="row">Name:</th>\
-                        <td>' + (feature.properties['Name:'] !== null ? autolinker.link(String(feature.properties['Name:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                    <tr>\
-                        <th scope="row">Elevation Gain:</th>\
-                        <td>' + (feature.properties['Elevation Gain:'] !== null ? autolinker.link(String(feature.properties['Elevation Gain:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                    <tr>\
-                        <th scope="row">Length:</th>\
-                        <td>' + (feature.properties['Length:'] !== null ? autolinker.link(String(feature.properties['Length:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                </table>';
-            var content = removeEmptyRowsFromPopupContent(popupContent, feature);
-			layer.on('popupopen', function(e) {
-				addClassToPopupIfMedia(content, e.popup);
-			});
-			layer.bindPopup(content, { maxHeight: 400 });
         }
 
         function style_PinkLoop_6_0() {
@@ -580,6 +645,7 @@
         bounds_group.addLayer(layer_PinkLoop_6);
         map.addLayer(layer_PinkLoop_6);
         function pop_PinkTurtlebackLoop_7(feature, layer) {
+                createTrailPopupWithElevation(feature, layer);
             layer.on({
                 mouseout: function(e) {
                     for (var i in e.target._eventParents) {
@@ -590,33 +656,6 @@
                 },
                 mouseover: highlightFeature,
             });
-            var popupContent = '<table>\
-                    <tr>\
-                        <th scope="row">Name:</th>\
-                        <td>' + (feature.properties['Name:'] !== null ? autolinker.link(String(feature.properties['Name:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                    <tr>\
-                        <th scope="row">Terrain:</th>\
-                        <td>' + (feature.properties['Terrain:'] !== null ? autolinker.link(String(feature.properties['Terrain:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                    <tr>\
-                        <th scope="row">Description:</th>\
-                        <td>' + (feature.properties['Description:'] !== null ? autolinker.link(String(feature.properties['Description:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                    <tr>\
-                        <th scope="row">Elevation Gain:</th>\
-                        <td>' + (feature.properties['Elevation Gain:'] !== null ? autolinker.link(String(feature.properties['Elevation Gain:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                    <tr>\
-                        <th scope="row">Length:</th>\
-                        <td>' + (feature.properties['Length:'] !== null ? autolinker.link(String(feature.properties['Length:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                </table>';
-            var content = removeEmptyRowsFromPopupContent(popupContent, feature);
-			layer.on('popupopen', function(e) {
-				addClassToPopupIfMedia(content, e.popup);
-			});
-			layer.bindPopup(content, { maxHeight: 400 });
         }
 
         function style_PinkTurtlebackLoop_7_0() {
@@ -647,6 +686,7 @@
         bounds_group.addLayer(layer_PinkTurtlebackLoop_7);
         map.addLayer(layer_PinkTurtlebackLoop_7);
         function pop_GreenLocustGroveLoop_8(feature, layer) {
+                createTrailPopupWithElevation(feature, layer);
             layer.on({
                 mouseout: function(e) {
                     for (var i in e.target._eventParents) {
@@ -657,34 +697,8 @@
                 },
                 mouseover: highlightFeature,
             });
-            var popupContent = '<table>\
-                    <tr>\
-                        <th scope="row">Name:</th>\
-                        <td>' + (feature.properties['Name:'] !== null ? autolinker.link(String(feature.properties['Name:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                    <tr>\
-                        <th scope="row">Terrain:</th>\
-                        <td>' + (feature.properties['Terrain:'] !== null ? autolinker.link(String(feature.properties['Terrain:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                    <tr>\
-                        <th scope="row">Description:</th>\
-                        <td>' + (feature.properties['Description:'] !== null ? autolinker.link(String(feature.properties['Description:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                    <tr>\
-                        <th scope="row">Length:</th>\
-                        <td>' + (feature.properties['Length:'] !== null ? autolinker.link(String(feature.properties['Length:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                    <tr>\
-                        <th scope="row">Elevation Gain:</th>\
-                        <td>' + (feature.properties['Elevation Gain:'] !== null ? autolinker.link(String(feature.properties['Elevation Gain:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                </table>';
-            var content = removeEmptyRowsFromPopupContent(popupContent, feature);
-			layer.on('popupopen', function(e) {
-				addClassToPopupIfMedia(content, e.popup);
-			});
-			layer.bindPopup(content, { maxHeight: 400 });
         }
+
 
         function style_GreenLocustGroveLoop_8_0() {
             return {
@@ -714,6 +728,8 @@
         bounds_group.addLayer(layer_GreenLocustGroveLoop_8);
         map.addLayer(layer_GreenLocustGroveLoop_8);
         function pop_BlueMayappleLoop_9(feature, layer) {
+                createTrailPopupWithElevation(feature, layer);
+
             layer.on({
                 mouseout: function(e) {
                     for (var i in e.target._eventParents) {
@@ -724,33 +740,6 @@
                 },
                 mouseover: highlightFeature,
             });
-            var popupContent = '<table>\
-                    <tr>\
-                        <th scope="row">Name:</th>\
-                        <td>' + (feature.properties['Name:'] !== null ? autolinker.link(String(feature.properties['Name:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                    <tr>\
-                        <th scope="row">Terrain:</th>\
-                        <td>' + (feature.properties['Terrain:'] !== null ? autolinker.link(String(feature.properties['Terrain:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                    <tr>\
-                        <th scope="row">Description:</th>\
-                        <td>' + (feature.properties['Description:'] !== null ? autolinker.link(String(feature.properties['Description:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                    <tr>\
-                        <th scope="row">Elevation Gain:</th>\
-                        <td>' + (feature.properties['Elevation Gain:'] !== null ? autolinker.link(String(feature.properties['Elevation Gain:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                    <tr>\
-                        <th scope="row">Length:</th>\
-                        <td>' + (feature.properties['Length:'] !== null ? autolinker.link(String(feature.properties['Length:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-                    </tr>\
-                </table>';
-            var content = removeEmptyRowsFromPopupContent(popupContent, feature);
-			layer.on('popupopen', function(e) {
-				addClassToPopupIfMedia(content, e.popup);
-			});
-			layer.bindPopup(content, { maxHeight: 400 });
         }
 
         function style_BlueMayappleLoop_9_0() {
@@ -921,432 +910,3 @@
         </script>
 
 <script>
-    // Store GPX tracks and elevation controls
-/// Single elevation control
-let currentElevationControl = null;
-let currentElevationLayer = null;
-let clickHandlersActive = true;
-
-// Function to clear and remove elevation chart and related track
-function clearElevationChart() {
-    console.log("Clearing elevation chart");
-    
-    // Temporarily disable click handlers during cleanup
-    clickHandlersActive = false;
-
-    // Remove the elevation layer from the map
-    if (currentElevationLayer && map.hasLayer(currentElevationLayer)) {
-        console.log("Removing elevation path layer");
-        map.removeLayer(currentElevationLayer);
-        currentElevationLayer = null;
-    }
-
-    // Fully remove elevation control and its internals
-    if (currentElevationControl) {
-        try {
-            console.log("Removing elevation control");
-            
-            // Try clearing hover marker and listeners
-            if (currentElevationControl._marker) {
-                map.removeLayer(currentElevationControl._marker);
-                currentElevationControl._marker = null;
-            }
-
-            // Clean up event listeners
-            if (currentElevationControl._mouseMoveHandler) {
-                map.off("mousemove", currentElevationControl._mouseMoveHandler);
-                currentElevationControl._mouseMoveHandler = null;
-            }
-            
-            // Remove any additional custom listeners
-            if (currentElevationControl._listeners) {
-                for (const [event, handler] of Object.entries(currentElevationControl._listeners)) {
-                    map.off(event, handler);
-                }
-                currentElevationControl._listeners = {};
-            }
-
-            // Properly remove the control from the map
-            if (currentElevationControl.remove) {
-                currentElevationControl.remove();
-            } else if (currentElevationControl._container) {
-                // Fallback removal if .remove() doesn't exist
-                currentElevationControl._container.remove();
-            }
-            
-            // Remove any custom close buttons we might have added
-            const closeButtons = document.querySelectorAll('.elevation-close-btn');
-            closeButtons.forEach(btn => btn.remove());
-            
-            currentElevationControl = null;
-        } catch (e) {
-            console.warn("Error removing elevation control:", e);
-        }
-    }
-
-    // Clear any detached elevation div if used
-    const elevationDiv = document.getElementById("elevation-div");
-    if (elevationDiv) {
-        elevationDiv.innerHTML = '';
-        elevationDiv.style.display = 'none';
-    }
-
-    // Restore default cursor just in case
-    map.getContainer().style.cursor = '';
-    
-    // Re-enable click handlers after a short delay
-    setTimeout(function() {
-        clickHandlersActive = true;
-    }, 200);
-}
-
-// Function to load and display GPX elevation
-function loadGPXElevation(gpxFilePath) {
-    console.log("Loading GPX elevation for:", gpxFilePath);
-    
-    if (!clickHandlersActive) {
-        console.log("Click handlers inactive, ignoring this click");
-        return;
-    }
-    
-    // Temporarily disable click handlers
-    clickHandlersActive = false;
-    
-    // First clear any existing chart
-    clearElevationChart();
-    
-    // Create new elevation control with a short delay to allow clearing to complete
-    setTimeout(function() {
-        try {
-            console.log("Creating new elevation control");
-            
-            // Create fresh elevation control
-            currentElevationControl = L.control.elevation({
-                position: "bottomleft",
-                theme: "lime-theme", // Match the example theme
-                detached: false,     // Keep it attached to the map like in the example
-                collapsed: false,    // Don't collapse it
-                autohide: false,     // Don't hide automatically
-                width: 400,          // Reasonable width for the chart
-                height: 125,         // Height of the chart
-                followMarker: true,
-                hoverNumber: {
-                    decimalsX: 2,
-                    decimalsY: 0
-                },
-                imperial: true,
-                useHeightIndicator: true,
-                polylineOptions: {
-                    color: "#566B13", // Match the lime theme color
-                    opacity: 0.8
-                }
-            });
-            
-            // Initialize with empty _listeners property for cleanup
-            currentElevationControl._listeners = {};
-            
-            // Add to map
-            currentElevationControl.addTo(map);
-
-            // Capture a reference to the layer that will be created
-            const originalAddData = currentElevationControl.addData;
-            currentElevationControl.addData = function(data) {
-                const result = originalAddData.call(this, data);
-                
-                // After adding data, find the newly created layer
-                map.eachLayer(function(layer) {
-                    if (layer._path && !layer._isBaseLayer && !layer._checked) {
-                        console.log("Found likely elevation path layer");
-                        layer._checked = true;
-                        currentElevationLayer = layer;
-                    }
-                });
-                
-                return result;
-            };
-            
-            // Load the GPX file
-            console.log("Loading GPX file:", gpxFilePath);
-            currentElevationControl.load(gpxFilePath);
-            
-            // Add a close button to the elevation control
-            setTimeout(function() {
-                // Add close button to control
-                if (currentElevationControl._container) {
-                    const closeBtn = document.createElement('button');
-                    closeBtn.className = 'elevation-close-btn';
-                    closeBtn.innerHTML = '✖';
-                    closeBtn.title = 'Close elevation profile';
-                    closeBtn.addEventListener('click', function(e) {
-                        e.stopPropagation();
-                        clearElevationChart();
-                    });
-                    currentElevationControl._container.appendChild(closeBtn);
-                }
-                
-                // Re-enable click handlers
-                clickHandlersActive = true;
-            }, 300);
-            
-        } catch (e) {
-            console.error("Error creating elevation chart:", e);
-            clickHandlersActive = true; // Re-enable click handlers even on error
-        }
-    }, 200);
-}
-
-// Add click handlers to all GeoJSON layers
-function addGPXClickHandlers() {
-    console.log("Adding GPX click handlers");
-    
-    map.eachLayer(function(layer) {
-        if (layer.feature && layer.feature.properties && !layer._gpxClickHandlerAdded) {
-            // Mark layer as having handler attached
-            layer._gpxClickHandlerAdded = true;
-            
-            // Create click handler function
-            const clickHandler = function(e) {
-                // Immediately stop propagation
-                if (e.originalEvent) {
-                    e.originalEvent.stopPropagation();
-                }
-                
-                // Only proceed if click handlers are active
-                if (!clickHandlersActive) {
-                    console.log("Click handlers inactive, ignoring click on feature");
-                    return;
-                }
-                
-                // Get feature and process GPX
-                const feature = e.target.feature;
-                if (feature.properties && feature.properties.gpx_file) {
-                    const gpxFileName = feature.properties.gpx_file;
-                    const gpxFilePath = `gpx_files/${gpxFileName}`;
-                    console.log("Clicked feature with GPX:", gpxFilePath);
-                    loadGPXElevation(gpxFilePath);
-                } else {
-                    console.log("Clicked feature has no GPX file associated");
-                }
-            };
-            
-            // Remove any existing click handlers first to prevent duplicates
-            layer.off('click');
-            
-            // Add the click handler
-            layer.on('click', clickHandler);
-        }
-    });
-}
-
-// Safe initialization function
-function initElevationFeatures() {
-    console.log("Initializing elevation features");
-    
-    // Create elevation-div if it doesn't exist
-    if (!document.getElementById("elevation-div")) {
-        const elevDiv = document.createElement("div");
-        elevDiv.id = "elevation-div";
-        elevDiv.style.position = "fixed";
-        elevDiv.style.bottom = "10px";
-        elevDiv.style.left = "10px";
-        elevDiv.style.right = "10px";
-        elevDiv.style.height = "200px";
-        elevDiv.style.backgroundColor = "white";
-        elevDiv.style.zIndex = "1000";
-        elevDiv.style.display = "none";
-        document.body.appendChild(elevDiv);
-    }
-    
-    // Add handlers to existing GeoJSON layers
-    addGPXClickHandlers();
-    
-    // Set up close button if it exists
-    const closeBtn = document.getElementById("close-elevation");
-    if (closeBtn) {
-        closeBtn.addEventListener("click", function(e) {
-            console.log("Close button clicked");
-            e.stopPropagation(); // Prevent event bubbling
-            clearElevationChart();
-        });
-    }
-    
-    // Add map click handler for clearing when clicking empty areas
-    map.on('click', function(e) {
-        console.log("Map background clicked");
-        clearElevationChart();
-    });
-    
-    // Add handler for new layers
-    map.on('layeradd', function(e) {
-        const layer = e.layer;
-        if (layer.feature && layer.feature.properties && !layer._gpxClickHandlerAdded) {
-            // Mark layer as having handler attached
-            layer._gpxClickHandlerAdded = true;
-            
-            // Create click handler function
-            const clickHandler = function(e) {
-                // Immediately stop propagation
-                if (e.originalEvent) {
-                    e.originalEvent.stopPropagation();
-                }
-                
-                // Only proceed if click handlers are active
-                if (!clickHandlersActive) {
-                    console.log("Click handlers inactive, ignoring click on feature");
-                    return;
-                }
-                
-                // Get feature and process GPX
-                const feature = e.target.feature;
-                if (feature.properties && feature.properties.gpx_file) {
-                    const gpxFileName = feature.properties.gpx_file;
-                    const gpxFilePath = `gpx_files/${gpxFileName}`;
-                    console.log("Clicked feature with GPX:", gpxFilePath);
-                    loadGPXElevation(gpxFilePath);
-                } else {
-                    console.log("Clicked feature has no GPX file associated");
-                }
-            };
-            
-            // Add the click handler
-            layer.on('click', clickHandler);
-        }
-    });
-}
-
-// Additional CSS for elevation chart - add to your stylesheet or head
-function addElevationStyles() {
-    const styleEl = document.createElement('style');
-    styleEl.innerHTML = `
-    /* Style for when we need to use the detached mode */
-    #elevation-div {
-        position: fixed;
-        bottom: 10px;
-        left: 10px;
-        width: 400px; 
-        height: 200px;
-        background-color: white;
-        z-index: 1000;
-        display: none;
-        box-shadow: 0 0 10px rgba(0,0,0,0.2);
-        border-radius: 4px;
-        overflow: hidden;
-    }
-    
-    #elevation-div.visible {
-        display: block;
-    }
-    
-    /* Styling for the chart itself */
-    .elevation-control.leaflet-control {
-        box-shadow: 0 1px 5px rgba(0,0,0,0.4);
-        background: #fff;
-        border-radius: 5px;
-    }
-    
-    /* Lime theme styling to match example */
-    .lime-theme.elevation-control.leaflet-control {
-        border-radius: 0;
-        background: none !important;
-    }
-    
-    .lime-theme .area {
-        fill: #9CC222;
-        fill-opacity: 0.5;
-    }
-    
-    .lime-theme .axis line {
-        stroke: #566B13;
-    }
-    
-    .lime-theme .axis path {
-        stroke: #566B13;
-    }
-    
-    .lime-theme .grid .tick line {
-        stroke: #CDE926;
-        stroke-opacity: 0.7;
-    }
-    
-    .lime-theme .mouse-drag {
-        fill: rgba(99, 126, 11, 0.4);
-    }
-    
-    .lime-theme .mouse-focus-line {
-        stroke: #566B13;
-    }
-    
-    .lime-theme .mouse-focus-label {
-        fill: #566B13;
-    }
-    
-    .lime-theme .mouse-focus-label-rect {
-        fill: white;
-        fill-opacity: 0.95;
-        stroke: #566B13;
-        stroke-width: 1;
-    }
-    
-    .lime-theme .grid path {
-        stroke-width: 0;
-    }
-    
-    .lime-theme .axis text {
-        fill: #566B13;
-    }
-    
-    /* Add a close button for attached mode */
-    .elevation-close-btn {
-        position: absolute;
-        top: 5px;
-        right: 5px;
-        z-index: 9999;
-        background: white;
-        border: 1px solid #ccc;
-        border-radius: 4px;
-        padding: 2px 4px;
-        cursor: pointer;
-        font-size: 16px;
-        line-height: 1;
-    }
-    `;
-    
-    document.head.appendChild(styleEl);
-}
-
-// Wait for document and map to load
-document.addEventListener('DOMContentLoaded', function() {
-    console.log("DOM content loaded, checking for map");
-    
-    // Add elevation styles
-    addElevationStyles();
-    
-    // Check for map
-    if (typeof map !== 'undefined') {
-        console.log("Map is already defined");
-        initElevationFeatures();
-    } else {
-        console.log("Waiting for map to be defined");
-        // Set an interval to check for the map variable
-        const mapCheckInterval = setInterval(function() {
-            if (typeof map !== 'undefined') {
-                console.log("Map is now defined");
-                clearInterval(mapCheckInterval);
-                initElevationFeatures();
-            }
-        }, 200);
-        
-        // Failsafe - try one more time after 3 seconds
-        setTimeout(function() {
-            if (typeof map === 'undefined') {
-                console.warn("Map still not defined after timeout");
-            } else if (!map._gpxHandlersInitialized) {
-                console.log("Running init as failsafe");
-                initElevationFeatures();
-            }
-        }, 3000);
-    }
-});
-</script>
-    </body>    
-</html>
