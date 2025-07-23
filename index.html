@@ -136,143 +136,208 @@
         <script src="data/SquatchHQ_10.js"></script>
         <script>
 
-         
-        // ==========================================
-        // ADD ALL THE NEW ELEVATION CODE RIGHT HERE
-        // ==========================================
-        
-        // Global elevation control variable
-        let currentElevationControl = null;
-        let currentGPXLayer = null;
-   
-        // Function to load GPX and create elevation chart
+      
+// ==========================================
+// REFACTORED ELEVATION CODE - SINGLE CONTROL
+// ==========================================
+
+// Global elevation control variable - create once and reuse
+let elevationControl = null;
+let currentGPXLayers = new Map(); // Track all loaded GPX layers
+
+// Initialize the elevation control once when the map loads
+function initializeElevationControl() {
+    if (!elevationControl) {
+        elevationControl = L.control.elevation({
+            position: "bottomright",
+            width: 500,
+            detached: false,
+            theme: "lime-theme",
+            summary: "inline",
+            ruler: true,
+            legend: true,
+            imperial: true,
+            time: false,
+            collapsed: false, // Start expanded since we don't have expand/collapse methods
+            autohide: false,
+        });
+        elevationControl.addTo(map);
+    }
+}
+
+// Function to load GPX and add to the single elevation control
 function loadGPXElevation(gpxFilePath) {
-    const container = document.getElementById('elevation-div');
-    clearElevationControl();
-
-
-    // Add the detached class to trigger your CSS styles
-    //container.classList.add('detached');
-
-    //container.style.display = 'block';
-    //container.innerHTML = '';  // clear container for elevation control's internal DOM
-
-    currentElevationControl = L.control.elevation({
-        position: "bottomright",
-        width: '500',
-        detached: false,
-        //detachedContainer: container,
-        theme: "lime-theme",
-        summary: "inline",
-        ruler: true,
-        legend: true,
+    // Initialize elevation control if it doesn't exist
+    initializeElevationControl();
+    
+    // Clear any existing GPX layers from the map first
+    currentGPXLayers.forEach((data) => {
+        if (data.layer) {
+            map.removeLayer(data.layer);
+        }
     });
+    currentGPXLayers.clear();
+    
+    // Check if this GPX is already loaded
+    if (currentGPXLayers.has(gpxFilePath)) {
+        return;
+    }
 
-    currentElevationControl.addTo(map);
-
-    currentGPXLayer = new L.GPX(gpxFilePath, {
+    const gpxLayer = new L.GPX(gpxFilePath, {
         async: true,
-        marker_options: { startIconUrl: null, endIconUrl: null, shadowUrl: null }
+        marker_options: { 
+            startIconUrl: null, 
+            endIconUrl: null, 
+            shadowUrl: null 
+        },
+        // Make the GPX layer non-interactive so it doesn't block clicks
+        interactive: false,
+        // Reduce opacity so it doesn't visually interfere too much
+        opacity: 0.7,
+        // Put it behind other layers
+        pane: 'overlayPane'
     })
     .on('loaded', function(e) {
-        container.innerHTML = '';  // clear loading message
-        currentElevationControl.load(e.target._gpx);
+        // Load this track into the elevation control
+        elevationControl.load(e.target._gpx);
+        
+        // Store reference to this layer
+        currentGPXLayers.set(gpxFilePath, {
+            layer: gpxLayer,
+            gpxData: e.target._gpx
+        });
+        
+        // Make sure the GPX layer doesn't interfere with mouse events
+        if (gpxLayer._path) {
+            gpxLayer._path.style.pointerEvents = 'none';
+        }
     })
     .on('error', function(err) {
-        container.innerHTML = '<div class="elevation-error">Failed to load elevation data.</div>';
+        console.error('Failed to load GPX:', gpxFilePath, err);
     });
 
-    map.addLayer(currentGPXLayer);
+    // Add the GPX layer to the map
+    map.addLayer(gpxLayer);
 }
 
-function clearElevationControl() {
-    if (currentElevationControl) {
-        try {
-            currentElevationControl.clear();
-        } catch (e) {}
-        currentElevationControl = null;
-    }
-    if (currentGPXLayer) {
-        map.removeLayer(currentGPXLayer);
-        currentGPXLayer = null;
-    }
-    const container = document.getElementById('elevation-div');
-    if(container) {
-        container.style.display = 'none';
-        container.classList.remove('detached');
-        container.innerHTML = '';
-    }
-}
-
+// Function to remove a specific GPX track
+function removeGPXTrack(gpxFilePath) {
+    if (currentGPXLayers.has(gpxFilePath)) {
+        const gpxData = currentGPXLayers.get(gpxFilePath);
         
-                // Modified popup function for trails with GPX files
-        function createTrailPopupWithElevation(feature, layer) {
-            // Set up mouse events for highlighting
-            layer.on({
-                mouseout: function(e) {
-                    for (var i in e.target._eventParents) {
-                        if (typeof e.target._eventParents[i].resetStyle === 'function') {
-                            e.target._eventParents[i].resetStyle(e.target);
-                        }
-                    }
-                },
-                mouseover: highlightFeature,
-            });
-
-            // Create popup content with elevation container
-            var popupContent = '<table>' +
-    '<tr>' +
-        '<th scope="row">Name:</th>' +
-        '<td>' + (feature.properties['Name:'] !== null ? autolinker.link(String(feature.properties['Name:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>' +
-    '</tr>' +
-    '<tr>' +
-        '<th scope="row">Terrain:</th>' +
-        '<td>' + (feature.properties['Terrain:'] !== null ? autolinker.link(String(feature.properties['Terrain:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>' +
-    '</tr>' +
-    '<tr>' +
-        '<th scope="row">Description:</th>' +
-        '<td>' + (feature.properties['Description:'] !== null ? autolinker.link(String(feature.properties['Description:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>' +
-    '</tr>' +
-    '<tr>' +
-        '<th scope="row">Elevation Gain:</th>' +
-        '<td>' + (feature.properties['Elevation Gain:'] !== null ? autolinker.link(String(feature.properties['Elevation Gain:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>' +
-    '</tr>' +
-    '<tr>' +
-        '<th scope="row">Length:</th>' +
-        '<td>' + (feature.properties['Length:'] !== null ? autolinker.link(String(feature.properties['Length:']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>' +
-    '</tr>' +
-'</table>'
-            var content = removeEmptyRowsFromPopupContent(popupContent, feature);
-            
-            // Handle popup events
-            layer.on('popupopen', function(e) {
-                addClassToPopupIfMedia(content, e.popup);
-                
-                // Load elevation chart if GPX file exists
-                if (feature.properties && feature.properties.gpx_file) {
-                    const gpxFileName = feature.properties.gpx_file;
-                    const gpxFilePath = `gpx_files/${gpxFileName}`;
-                    
-                    // Wait a bit for the popup to render, then load elevation
-                    setTimeout(() => {
-                        const elevationContainer = document.getElementById('elevation-container');
-                        if (elevationContainer) {
-                            loadGPXElevation(gpxFilePath);
-                        }
-                    }, 100);
-                }
-            });
-            
-            // Clear elevation control when popup closes
-            layer.on('popupclose', function(e) {
-                clearElevationControl();
-            });
-            
-            layer.bindPopup(content, { 
-                maxHeight: 600, // Increased to accommodate elevation chart
-                maxWidth: 500
-            });
+        // Remove from map
+        if (gpxData.layer) {
+            map.removeLayer(gpxData.layer);
         }
+        
+        // Remove from our tracking
+        currentGPXLayers.delete(gpxFilePath);
+        
+        // Clear the elevation control and reload remaining tracks
+        if (elevationControl) {
+            elevationControl.clear();
+            
+            // If there are remaining tracks, load the first one
+            // (Note: leaflet-elevation typically shows one track at a time)
+            if (currentGPXLayers.size > 0) {
+                const firstTrack = currentGPXLayers.values().next().value;
+                if (firstTrack && firstTrack.gpxData) {
+                    elevationControl.load(firstTrack.gpxData);
+                }
+            }
+        }
+    }
+}
+
+// Function to clear all elevation data
+function clearAllElevationData() {
+    if (elevationControl) {
+        elevationControl.clear();
+    }
+    
+    // Remove all GPX layers from map
+    currentGPXLayers.forEach((data) => {
+        if (data.layer) {
+            map.removeLayer(data.layer);
+        }
+    });
+    
+    currentGPXLayers.clear();
+}
+
+// Modified popup function for trails with GPX files
+function createTrailPopupWithElevation(feature, layer) {
+    // Set up mouse events for highlighting
+    layer.on({
+        mouseout: function(e) {
+            for (var i in e.target._eventParents) {
+                if (typeof e.target._eventParents[i].resetStyle === 'function') {
+                    e.target._eventParents[i].resetStyle(e.target);
+                }
+            }
+        },
+        mouseover: highlightFeature,
+    });
+
+    // Create popup content - only show rows for properties that exist
+    let rows = '';
+
+    function addRow(label, key) {
+        const value = feature.properties[key];
+        if (value !== null && value !== undefined && value !== '') {
+            rows += '<tr>' +
+                        '<th scope="row">' + label + '</th>' +
+                        '<td>' + autolinker.link(String(value).replace(/'/g, '\'').toLocaleString()) + '</td>' +
+                    '</tr>';
+        }
+    }
+
+    // Only add rows if the corresponding property exists
+    addRow('Name:', 'Name:');
+    addRow('Terrain:', 'Terrain:');
+    addRow('Description:', 'Description:');
+    addRow('Elevation Gain:', 'Elevation Gain:');
+    addRow('Length:', 'Length:');
+
+    const popupContent = `<table>${rows}</table>`;
+    var content = removeEmptyRowsFromPopupContent(popupContent, feature);
+    
+    // Handle popup events
+    layer.on('popupopen', function(e) {
+        addClassToPopupIfMedia(content, e.popup);
+        
+        // Load elevation chart if GPX file exists
+        if (feature.properties && feature.properties.gpx_file) {
+            const gpxFileName = feature.properties.gpx_file;
+            const gpxFilePath = `gpx_files/${gpxFileName}`;
+            
+            // Wait a bit for the popup to render, then load elevation
+            setTimeout(() => {
+                loadGPXElevation(gpxFilePath);
+            }, 100);
+        }
+    });
+    
+    // OPTION 1: Keep tracks when popup closes (allows comparison)
+    // Comment out the next section if you want tracks to persist
+    
+    // OPTION 2: Remove GPX layer when popup closes to prevent click interference
+    // This ensures you can always click on trail features
+    layer.on('popupclose', function(e) {
+        if (feature.properties && feature.properties.gpx_file) {
+            const gpxFileName = feature.properties.gpx_file;
+            const gpxFilePath = `gpx_files/${gpxFileName}`;
+            removeGPXTrack(gpxFilePath);
+        }
+    });
+    
+    layer.bindPopup(content, { 
+        maxHeight: 600, // Increased to accommodate elevation chart
+        maxWidth: 500
+    });
+}
+
+
     
         
         var highlightLayer;
