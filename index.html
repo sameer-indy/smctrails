@@ -100,7 +100,7 @@
          <script src="https://cdn.jsdelivr.net/npm/leaflet-gpx@1.7.0/gpx.min.js"></script>
         
         </style>
-        <title>Sassquad South Mountain Reservation Races</title>
+        <title>South Mountain Reservation Races</title>
     </head>
     <body>
         <div id="container">
@@ -394,7 +394,7 @@ function createTrailPopupWithElevation(feature, layer) {
             return this._div;
         };
         title.update = function () {
-            this._div.innerHTML = '<h2>Sassquad South Mountain Reservation Races</h2>';
+            this._div.innerHTML = '<h2>South Mountain Reservation Races</h2>';
         };
         title.addTo(map);
         var abstract = new L.Control({'position':'topright'});
@@ -415,7 +415,7 @@ function createTrailPopupWithElevation(feature, layer) {
             abstract.show = function () {
                 this._div.classList.remove("abstract");
                 this._div.classList.add("abstractUncollapsed");
-                this._div.innerHTML = 'Here is a web map containing routes and information for Sassquad events that occur on South Mountain Reservation, in Essex County New Jersey. Use the layer list to toggle on and off routes which are used in the mountain for our races. Click a route to view more information about it!';
+                this._div.innerHTML = 'Here is a web map containing routes and information for events that occur on South Mountain Reservation, in Essex County New Jersey. Use the layer list to toggle on and off routes which are used in the mountain for our races. Click a route to view more information about it!';
         };
         abstract.addTo(map);
         var zoomControl = L.control.zoom({
