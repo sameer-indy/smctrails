@@ -100,13 +100,14 @@
          <script src="https://cdn.jsdelivr.net/npm/leaflet-gpx@1.7.0/gpx.min.js"></script>
         
         </style>
-        <title>South Mountain Reservation Races</title>
+        <title>Sassquad South Mountain Reservation Races</title>
     </head>
     <body>
         <div id="container">
             <div id="map"></div>
             <div id="elevation-container"></div>
-            //<div id="elevation-div" class="lime-theme"></div>
+            <div id="sidebar-content" style="position:fixed; bottom:10px; left:10px; background:white; padding:10px; max-width:300px; z-index:999;"></div>
+
             </div>
         </div>
         
@@ -138,12 +139,12 @@
 
       
 // ==========================================
-// REFACTORED ELEVATION CODE - SINGLE CONTROL
+// INVISIBLE GPX APPROACH - DATA ONLY
 // ==========================================
 
-// Global elevation control variable - create once and reuse
+// Global elevation control variable and tracking
 let elevationControl = null;
-let currentGPXLayers = new Map(); // Track all loaded GPX layers
+let currentGPXData = new Map(); // Store GPX data, not layers
 
 // Initialize the elevation control once when the map loads
 function initializeElevationControl() {
@@ -158,95 +159,134 @@ function initializeElevationControl() {
             legend: true,
             imperial: true,
             time: false,
-            collapsed: false, // Start expanded since we don't have expand/collapse methods
+            collapsed: false,
             autohide: false,
         });
         elevationControl.addTo(map);
     }
 }
 
-// Function to load GPX and add to the single elevation control
+// Function to load GPX data for elevation WITHOUT adding visual layer to map
 function loadGPXElevation(gpxFilePath) {
     // Initialize elevation control if it doesn't exist
     initializeElevationControl();
     
-    // Clear any existing GPX layers from the map first
-    currentGPXLayers.forEach((data) => {
-        if (data.layer) {
-            map.removeLayer(data.layer);
-        }
-    });
-    currentGPXLayers.clear();
+    // Clear existing elevation data
+    if (elevationControl) {
+        elevationControl.clear();
+    }
+    
+    // Clear existing data
+    currentGPXData.clear();
     
     // Check if this GPX is already loaded
-    if (currentGPXLayers.has(gpxFilePath)) {
+    if (currentGPXData.has(gpxFilePath)) {
         return;
     }
 
+    console.log('Loading GPX data (invisible):', gpxFilePath);
+
+    // Create GPX layer but DON'T add it to the map
     const gpxLayer = new L.GPX(gpxFilePath, {
         async: true,
         marker_options: { 
             startIconUrl: null, 
             endIconUrl: null, 
             shadowUrl: null 
-        },
-        // Make the GPX layer non-interactive so it doesn't block clicks
-        interactive: false,
-        // Reduce opacity so it doesn't visually interfere too much
-        opacity: 0.7,
-        // Put it behind other layers
-        pane: 'overlayPane'
+        }
+        // No pane, no interactive settings - we won't add this to the map
     })
     .on('loaded', function(e) {
-        // Load this track into the elevation control
+        console.log('GPX data loaded (not added to map):', gpxFilePath);
+        
+        // Load this track data into the elevation control
         elevationControl.load(e.target._gpx);
         
-        // Store reference to this layer
-        currentGPXLayers.set(gpxFilePath, {
-            layer: gpxLayer,
-            gpxData: e.target._gpx
+        // Store the GPX data (but not the layer)
+        currentGPXData.set(gpxFilePath, {
+            gpxData: e.target._gpx,
+            fileName: gpxFilePath
         });
         
-        // Make sure the GPX layer doesn't interfere with mouse events
-        if (gpxLayer._path) {
-            gpxLayer._path.style.pointerEvents = 'none';
-        }
+        // DO NOT add the layer to the map - this is the key difference
+        // gpxLayer is loaded but never added to map, so it can't block clicks
+        
+        console.log('Elevation chart loaded, GPX layer NOT added to map');
     })
     .on('error', function(err) {
-        console.error('Failed to load GPX:', gpxFilePath, err);
+        console.error('Failed to load GPX data:', gpxFilePath, err);
     });
 
-    // Add the GPX layer to the map
-    map.addLayer(gpxLayer);
+    // CRITICAL: Do NOT add gpxLayer to the map
+    // The GPX layer exists only to parse the data, not to be displayed
 }
 
-// Function to remove a specific GPX track
-function removeGPXTrack(gpxFilePath) {
-    if (currentGPXLayers.has(gpxFilePath)) {
-        const gpxData = currentGPXLayers.get(gpxFilePath);
-        
-        // Remove from map
-        if (gpxData.layer) {
-            map.removeLayer(gpxData.layer);
-        }
-        
-        // Remove from our tracking
-        currentGPXLayers.delete(gpxFilePath);
-        
-        // Clear the elevation control and reload remaining tracks
-        if (elevationControl) {
-            elevationControl.clear();
-            
-            // If there are remaining tracks, load the first one
-            // (Note: leaflet-elevation typically shows one track at a time)
-            if (currentGPXLayers.size > 0) {
-                const firstTrack = currentGPXLayers.values().next().value;
-                if (firstTrack && firstTrack.gpxData) {
-                    elevationControl.load(firstTrack.gpxData);
-                }
-            }
-        }
+// Alternative: Load GPX data using fetch and parse manually (more reliable)
+function loadGPXElevationWithFetch(gpxFilePath) {
+    // Initialize elevation control if it doesn't exist
+    initializeElevationControl();
+    
+    // Clear existing elevation data
+    if (elevationControl) {
+        elevationControl.clear();
     }
+    
+    currentGPXData.clear();
+    
+    console.log('Fetching GPX data directly:', gpxFilePath);
+    
+    fetch(gpxFilePath)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.text();
+        })
+        .then(gpxText => {
+            console.log('GPX file fetched successfully');
+            
+            // Parse the GPX text into a DOM document
+            const parser = new DOMParser();
+            const gpxDoc = parser.parseFromString(gpxText, 'application/xml');
+            
+            // Check for parsing errors
+            const parserError = gpxDoc.querySelector('parsererror');
+            if (parserError) {
+                throw new Error('Failed to parse GPX file');
+            }
+            
+            // Convert GPX DOM to GeoJSON using the elevation control's built-in parser
+            // We'll create a temporary GPX layer just to parse, but never add it to map
+            const tempGPX = new L.GPX(gpxDoc, {
+                async: false, // Since we already have the data
+                marker_options: { 
+                    startIconUrl: null, 
+                    endIconUrl: null, 
+                    shadowUrl: null 
+                }
+            });
+            
+            // Manually trigger the parsing
+            tempGPX._parse();
+            
+            // Load the parsed data into elevation control
+            if (tempGPX._gpx) {
+                elevationControl.load(tempGPX._gpx);
+                
+                // Store the data
+                currentGPXData.set(gpxFilePath, {
+                    gpxData: tempGPX._gpx,
+                    fileName: gpxFilePath
+                });
+                
+                console.log('Elevation chart loaded from fetched data');
+            } else {
+                throw new Error('Failed to parse GPX data');
+            }
+        })
+        .catch(error => {
+            console.error('Error loading GPX file:', error);
+        });
 }
 
 // Function to clear all elevation data
@@ -255,17 +295,11 @@ function clearAllElevationData() {
         elevationControl.clear();
     }
     
-    // Remove all GPX layers from map
-    currentGPXLayers.forEach((data) => {
-        if (data.layer) {
-            map.removeLayer(data.layer);
-        }
-    });
-    
-    currentGPXLayers.clear();
+    currentGPXData.clear();
+    console.log('All elevation data cleared');
 }
 
-// Modified popup function for trails with GPX files
+// Modified popup function - now uses invisible GPX loading
 function createTrailPopupWithElevation(feature, layer) {
     // Set up mouse events for highlighting
     layer.on({
@@ -279,7 +313,7 @@ function createTrailPopupWithElevation(feature, layer) {
         mouseover: highlightFeature,
     });
 
-    // Create popup content - only show rows for properties that exist
+    // Create popup content
     let rows = '';
 
     function addRow(label, key) {
@@ -292,7 +326,6 @@ function createTrailPopupWithElevation(feature, layer) {
         }
     }
 
-    // Only add rows if the corresponding property exists
     addRow('Name:', 'Name:');
     addRow('Terrain:', 'Terrain:');
     addRow('Description:', 'Description:');
@@ -311,31 +344,32 @@ function createTrailPopupWithElevation(feature, layer) {
             const gpxFileName = feature.properties.gpx_file;
             const gpxFilePath = `gpx_files/${gpxFileName}`;
             
-            // Wait a bit for the popup to render, then load elevation
+            console.log('Popup opened, loading invisible GPX:', gpxFilePath);
+            
+            // Try the fetch method first (more reliable)
             setTimeout(() => {
-                loadGPXElevation(gpxFilePath);
+                loadGPXElevationWithFetch(gpxFilePath);
+                
+                // Fallback to original method if fetch fails
+                setTimeout(() => {
+                    if (currentGPXData.size === 0) {
+                        console.log('Fetch method failed, trying GPX layer method');
+                        loadGPXElevation(gpxFilePath);
+                    }
+                }, 1000);
             }, 100);
         }
     });
     
-    // OPTION 1: Keep tracks when popup closes (allows comparison)
-    // Comment out the next section if you want tracks to persist
-    
-    // OPTION 2: Remove GPX layer when popup closes to prevent click interference
-    // This ensures you can always click on trail features
-    layer.on('popupclose', function(e) {
-        if (feature.properties && feature.properties.gpx_file) {
-            const gpxFileName = feature.properties.gpx_file;
-            const gpxFilePath = `gpx_files/${gpxFileName}`;
-            removeGPXTrack(gpxFilePath);
-        }
-    });
+    // NO popupclose handler - elevation persists
+    // No GPX layer added to map, so no click blocking
     
     layer.bindPopup(content, { 
-        maxHeight: 600, // Increased to accommodate elevation chart
+        maxHeight: 600,
         maxWidth: 500
     });
 }
+
     
         
         var highlightLayer;
@@ -394,7 +428,7 @@ function createTrailPopupWithElevation(feature, layer) {
             return this._div;
         };
         title.update = function () {
-            this._div.innerHTML = '<h2>South Mountain Reservation Races</h2>';
+            this._div.innerHTML = '<h2>Sassquad South Mountain Reservation Races</h2>';
         };
         title.addTo(map);
         var abstract = new L.Control({'position':'topright'});
@@ -415,7 +449,7 @@ function createTrailPopupWithElevation(feature, layer) {
             abstract.show = function () {
                 this._div.classList.remove("abstract");
                 this._div.classList.add("abstractUncollapsed");
-                this._div.innerHTML = 'Here is a web map containing routes and information for events that occur on South Mountain Reservation, in Essex County New Jersey. Use the layer list to toggle on and off routes which are used in the mountain for our races. Click a route to view more information about it!';
+                this._div.innerHTML = 'Here is a web map containing routes and information for Sassquad events that occur on South Mountain Reservation, in Essex County New Jersey. Use the layer list to toggle on and off routes which are used in the mountain for our races. Click a route to view more information about it!';
         };
         abstract.addTo(map);
         var zoomControl = L.control.zoom({
@@ -974,6 +1008,90 @@ function createTrailPopupWithElevation(feature, layer) {
         map.on("layerremove", function(){
             resetLabels([layer_Contours20ftIntervals_1,layer_SquatchHQ_10]);
         });
+
+
+// Add this code to fix the canvas blocking issue
+// Put this at the end of your existing script section
+
+function fixCanvasBlocking() {
+    console.log('Fixing canvas blocking...');
+    
+    // Find all canvas elements that might be blocking
+    const canvases = document.querySelectorAll('.leaflet-zoom-animated');
+    
+    canvases.forEach((canvas, index) => {
+        // Check if this canvas is in a position that could block trail clicks
+        const transform = canvas.style.transform;
+        const zIndex = canvas.style.zIndex;
+        
+        // Look for problematic canvases (positioned at 0,0 or with low z-index)
+        if (transform.includes('translate3d(0px, 0px, 0px)') || 
+            transform.includes('translate3d(55px, -291px, 0px)') ||
+            zIndex === '22' || zIndex === '19' || zIndex === '' || zIndex === 'default') {
+            
+            console.log(`Fixing canvas ${index}: ${transform}, z-index: ${zIndex}`);
+            
+            // Set pointer-events to none so it doesn't block clicks
+            canvas.style.pointerEvents = 'none';
+            
+            // Optionally, lower its z-index to be below trail layers
+            if (zIndex !== '' && zIndex !== 'default') {
+                canvas.style.zIndex = '1'; // Put it below everything
+            }
+        }
+    });
+    
+    console.log('Canvas blocking fix applied');
+}
+
+// Apply the fix when the page loads
+setTimeout(() => {
+    fixCanvasBlocking();
+    
+    // Also apply it after any layer changes
+    map.on('layeradd', function() {
+        setTimeout(fixCanvasBlocking, 100);
+    });
+    
+    map.on('zoomend', function() {
+        setTimeout(fixCanvasBlocking, 100);
+    });
+}, 1000);
+
+// Alternative approach: Force your trail layers to a higher z-index
+function moveTrailLayersToTop() {
+    console.log('Moving trail layers to top...');
+    
+    // Get all your trail panes and boost their z-index
+    const trailPanes = [
+        'pane_FrostyandSquatchyLeftoversLoop_2',
+        'pane_BlueLoop_3', 
+        'pane_CheckeredLoop_4',
+        'pane_YellowBlackLoop_5',
+        'pane_PinkLoop_6',
+        'pane_PinkTurtlebackLoop_7',
+        'pane_GreenLocustGroveLoop_8',
+        'pane_BlueMayappleLoop_9',
+        'pane_SquatchHQ_10'
+    ];
+    
+    trailPanes.forEach((paneName, index) => {
+        const pane = map.getPane(paneName);
+        if (pane) {
+            const newZIndex = 500 + index; // Much higher than any canvas
+            pane.style.zIndex = newZIndex;
+            console.log(`Set ${paneName} z-index to ${newZIndex}`);
+        }
+    });
+}
+
+// Try both approaches
+setTimeout(() => {
+    fixCanvasBlocking();
+    moveTrailLayersToTop();
+}, 1000);
+
+console.log('Canvas fix code added - should resolve clicking issues!');   
         </script>
 
 <script>
